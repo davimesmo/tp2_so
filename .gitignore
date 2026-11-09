@@ -1,0 +1,7 @@
+simulador
+tp2virtual
+*.o
+src/*.o
+results/
+.venv/
+PLANEJAMENTO.md
