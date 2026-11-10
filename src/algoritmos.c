@@ -40,21 +40,28 @@ int lru_substituir(MMU *mmu) {
     return lru;
 }
 
-/*
- * Politica CLOCK:
- * Trata os quadros como uma lista circular inspecionada por mmu->ponteiro_clock.
- * Percorre os quadros:
- *   - Se ref == 0: este quadro é a vítima escolhida. Avança o ponteiro e retorna.
- *   - Se ref == 1: concede a segunda chance limpando o bit (ref = 0) e avança o ponteiro.
- */
+
+  //Politica CLOCK:
 int clock_substituir(MMU *mmu) {
-    (void)mmu;
-    return 0;
+    int clock = 0;
+    while( 1 == 1){
+        if( mmu->quadros[mmu->ponteiro_clock].ref == 0){
+            clock = mmu->ponteiro_clock;
+            mmu->ponteiro_clock = (mmu->ponteiro_clock + 1) % mmu->num_quadros;
+            break;
+        }else{
+            mmu->quadros[mmu->ponteiro_clock].ref = 0;
+            mmu->ponteiro_clock = (mmu->ponteiro_clock + 1) % mmu->num_quadros;
+        }
+        
+    }
+    return clock;
 }
 
 
 // Politica FIFO (First In, First Out):
 int fifo_substituir(MMU *mmu) {
-    (void)mmu;
-    return 0;
+    int fifo = mmu->ponteiro_fifo;
+    mmu->ponteiro_fifo = (mmu->ponteiro_fifo + 1) % mmu->num_quadros;
+    return fifo;
 }
