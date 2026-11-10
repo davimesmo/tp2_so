@@ -30,6 +30,7 @@ MMU *mmu_criar(const char *algoritmo, unsigned int tam_pagina_kb, unsigned int t
     mmu->num_quadros = tam_memoria_kb / tam_pagina_kb;
     mmu->quadros_ocupados = 0;
     mmu->ponteiro_clock = 0;
+    mmu->ponteiro_fifo = 0;
 
     unsigned int tam_pagina_bytes = tam_pagina_kb * 1024;
     unsigned int tmp = tam_pagina_bytes;

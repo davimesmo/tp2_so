@@ -25,6 +25,7 @@ typedef struct {
     TabelaPaginas *tabela;
     char algoritmo[32];
     int ponteiro_clock;
+    int ponteiro_fifo;
 } MMU;
 
 MMU *mmu_criar(const char *algoritmo, unsigned int tam_pagina_kb, unsigned int tam_memoria_kb, TipoTabela tipo_tabela);
