@@ -11,7 +11,7 @@
 \usepackage{caption}
 \usepackage{microtype}
 
-\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+\geometry{left=2.2cm, right=2.2cm, top=2.4cm, bottom=2.4cm}
 \setlength{\emergencystretch}{3em}
 
 \title{\textbf{Trabalho Prático 2 -- Simulador de Memória Virtual}\\
@@ -23,59 +23,84 @@
 
 \maketitle
 
-\section{Resumo do Projeto}
+\section{Introdução}
 
-O simulador desenvolvido modela o subsistema de paginação sob demanda de um sistema operacional para endereços virtuais de 32 bits. O código foi escrito em C (padrão C99) e organizado em três módulos principais além do ponto de entrada (\texttt{main.c}): a unidade de gerenciamento de memória (\texttt{mmu.c} e \texttt{mmu.h}), a estrutura de tradução de endereços (\texttt{pagetable.c} e \texttt{pagetable.h}) e as políticas de substituição de páginas (\texttt{algoritmos.c} e \texttt{algoritmos.h}).
+A gerência de memória virtual por paginação sob demanda permite que processos executem mesmo quando seu espaço de endereçamento excede a memória física disponível, mantendo na RAM apenas as páginas ativas e buscando o restante no armazenamento secundário quando ocorrem faltas de página (\textit{page faults}). O desempenho desse mecanismo depende de duas escolhas fundamentais de projeto no sistema operacional: a estrutura da tabela de páginas, que dita a sobrecarga de memória e o tempo de tradução de endereços, e a política de substituição de páginas, que decide qual quadro físico desalojar quando a memória enche.
 
-A estrutura central \texttt{MMU} mantém o vetor de quadros físicos (\texttt{Quadro}), os contadores de estatísticas (total de acessos, páginas lidas e páginas sujas escritas de volta em disco) e os ponteiros auxiliares das políticas de substituição. Cada quadro físico armazena o número da página virtual (\texttt{vpn}) atualmente alocada, flags de ocupação (\texttt{ocupado}), modificação (\texttt{dirty}) e referência (\texttt{ref}), além dos carimbos de tempo lógicos de carga (\texttt{tempo\_carga}), último acesso (\texttt{ultimo\_acesso}) e distância até o próximo uso (\texttt{proximo\_acesso}, para o algoritmo ótimo teórico).
+Neste trabalho, projetamos e implementamos em linguagem C um simulador de memória virtual parametrizável capaz de processar arquivos de \textit{trace} contendo sequências de referências reais à memória (endereços hexadecimais de 32 bits acompanhados da operação de leitura \texttt{R} ou escrita \texttt{W}). O simulador foi construído em quatro módulos principais: o ponto de entrada (\texttt{main.c}), responsável pela leitura dos parâmetros e geração do relatório de saída; o núcleo da unidade de gerenciamento de memória (\texttt{mmu.c}), que coordena o ciclo de tradução, controle de bits de estado e contabilização de leituras e escritas em disco; o módulo de estruturas de tradução (\texttt{pagetable.c}), contendo quatro organizações de tabela de páginas; e o módulo de políticas de substituição (\texttt{algoritmos.c}).
 
-Para suportar tamanhos de página variados (de 2 KB a 64 KB), o deslocamento $s = \log_2(\text{tamanho da página em bytes})$ é calculado na inicialização da MMU por deslocamento sucessivo de bits. A cada linha lida do arquivo de entrada com \texttt{fscanf(arquivo, "\%x \%c", \&addr, \&rw)}, o número da página virtual é extraído via \texttt{vpn = addr >> s} e consultado na tabela de páginas:
-\begin{itemize}
-    \item \textbf{Acerto (Page Hit):} Atualiza-se o bit de referência (\texttt{ref = 1}) e o instante do último acesso com o contador global de acessos. Caso a operação seja de escrita (\texttt{W}), o bit \texttt{dirty} do quadro é ativado.
-    \item \textbf{Falta de página (Page Fault):} Incrementa-se o contador de páginas lidas. Se ainda existirem quadros físicos livres (\texttt{quadros\_ocupados < num\_quadros}), a página ocupa o próximo quadro livre sequencialmente. Caso a memória física esteja cheia, invoca-se o algoritmo de substituição configurado para escolher o quadro vítima. Se o quadro vítima estiver marcado com \texttt{dirty == 1}, contabiliza-se uma escrita em disco (\texttt{paginas\_escritas++}) antes de remover o mapeamento antigo e instalar a nova página.
-\end{itemize}
+Além de avaliar os quatro programas de referência (\texttt{compilador.log}, \texttt{compressor.log}, \texttt{matriz.log} e \texttt{simulador.log}) sob crescimento da memória física (128 KB a 16 MB) e variação do tamanho de página (2 KB a 64 KB), estendemos a investigação experimental em três frentes adicionais:
+\begin{enumerate}
+    \item A inclusão do \textbf{Algoritmo Ótimo Teórico de Belady (\texttt{opt})} como limite inferior matemático de faltas de página nos gráficos comparativos;
+    \item Um estudo em escala da \textbf{Anomalia de Belady}, avaliando a frequência com que o aumento de quadros físicos degrada o desempenho em políticas de fila (FIFO e CLOCK) frente à imunidade dos algoritmos de pilha (LRU e Ótimo) conforme variamos o número de quadros e o tamanho da entrada;
+    \item Uma análise do impacto do \textbf{\textit{dirty bit} (bit de modificação)}, contrastando o volume real de escritas em disco contra um cenário hipotético sem verificação de \textit{dirty bit} (no qual 100\% das páginas substituídas exigem escrita em disco) para comparar o comportamento do LRU e do CLOCK diante de páginas modificadas.
+\end{enumerate}
 
-\section{Motivação e Escolha dos Algoritmos e Tabelas}
+\section{Motivação e Metodologia de Implementação}
+
+\subsection{Metodologia Geral da MMU}
+
+A unidade de gerenciamento de memória (\texttt{MMU}) divide a memória física total em $Q = \text{tam\_memoria\_KB} / \text{tam\_pagina\_KB}$ quadros físicos. Como o tamanho de página pode variar entre potências de 2 (de 2 KB a 64 KB), o número de bits de deslocamento interno ($s$) é derivado na inicialização deslocando-se o tamanho da página em bytes para a direita até atingir $1$, de modo que $s = \log_2(\text{tam\_pagina\_bytes})$. Assim, para cada endereço de 32 bits lido do arquivo, o número da página virtual (VPN) é obtido por \texttt{vpn = addr >> s}, restando $b = 32 - s$ bits significativos para identificação da página.
+
+A cada acesso processado, a MMU consulta a tabela de páginas pelo \texttt{vpn}. Caso a página já esteja residente em um quadro físico (\textit{page hit}), atualiza-se o bit de referência daquele quadro para $1$, registra-se o instante atual do contador global de acessos e, se a operação for \texttt{W}, marca-se o bit de modificação (\textit{dirty}). Caso a página não esteja mapeada (\textit{page fault}), contabiliza-se uma página lida. Enquanto houver quadros livres, eles são ocupados sequencialmente; quando todos os $Q$ quadros estão cheios, o algoritmo de substituição seleciona um quadro vítima. Se o quadro vítima estiver marcado como modificado (\textit{dirty}), contabiliza-se uma página escrita em disco antes de invalidar seu mapeamento antigo e carregar a nova página.
 
 \subsection{Algoritmos de Substituição de Páginas}
 
-Além dos quatro algoritmos práticos solicitados pelo enunciado, implementamos também o \textbf{Algoritmo Ótimo de Belady (\texttt{opt})} como limite inferior teórico para enriquecer a comparação nos gráficos:
+Selecionamos quatro políticas práticas que cobrem os critérios do enunciado e adicionamos o algoritmo Ótimo para referência teórica:
 
-\begin{enumerate}
-    \item \textbf{Random (Critério de Aleatoriedade):} Escolhe um quadro físico de maneira uniforme usando \texttt{random() \% num\_quadros}, com semente fixa (\texttt{srandom(42)}) para garantir reprodutibilidade. Sua motivação no trabalho é servir como linha de base (\textit{baseline}) superior: como não guarda nenhum histórico de acesso e tem custo $O(1)$, permite medir o quanto políticas baseadas em localidade realmente compensam o esforço extra de controle. Esperamos que tenha o pior desempenho geral na maioria dos cenários, exceto em padrões de acesso puramente cíclicos maiores que a memória física.
+\begin{itemize}
+    \item \textbf{Random (Aleatoriedade):}
+    \begin{itemize}
+        \item \textit{Motivação:} Serve como linha de base estocástica de custo $O(1)$. Permite verificar em que medida algoritmos que mantêm histórico superam uma escolha cega e observar casos patológicos em que o sorteio evita sincronizações cíclicas.
+        \item \textit{Metodologia de implementação:} Utiliza o gerador pseudoaleatório padrão do C inicializado com semente fixa (\texttt{srandom(42)}) e seleciona o índice do quadro vítima por aritmética modular direta sobre o total de quadros (\texttt{random() \% num\_quadros}).
+    \end{itemize}
 
-    \item \textbf{LRU -- Least Recently Used (Critério de Histórico de Acessos Recentes):} Substitui o quadro cujo carimbo \texttt{ultimo\_acesso} seja o menor entre todos os quadros ocupados. A escolha do LRU justifica-se por explorar diretamente o princípio da localidade temporal: páginas acessadas nos últimos instantes têm alta probabilidade de serem referenciadas novamente em breve. A expectativa é que o LRU obtenha a menor taxa de faltas entre os algoritmos práticos nos quatro programas, ao custo de percorrer linearmente os quadros físicos na escolha da vítima.
+    \item \textbf{LRU -- Least Recently Used (Histórico de Acessos Recentes):}
+    \begin{itemize}
+        \item \textit{Motivação:} Explora diretamente a localidade temporal sob a premissa de que páginas referenciadas há menos tempo têm maior chance de reuso imediato.
+        \item \textit{Metodologia de implementação:} Foi implementado pelo método de contador lógico de tempo. A MMU mantém um contador global incrementado a cada referência à memória; todo acesso a um quadro (seja carga ou \textit{hit}) copia o valor atual desse contador para o carimbo de último acesso do quadro. Na falta de página, a função de substituição realiza uma busca linear $O(Q)$ sobre o vetor de quadros físicos e seleciona aquele que possui o menor carimbo de tempo.
+    \end{itemize}
 
-    \item \textbf{CLOCK / Segunda Chance (Critério de Frequência/Uso Recente):} Implementa uma fila circular inspecionada pelo índice \texttt{ponteiro\_clock}. Quando ocorre uma falta de página, o algoritmo verifica o bit \texttt{ref} do quadro apontado: se \texttt{ref == 1}, concede uma segunda chance zerando o bit (\texttt{ref = 0}) e avança o ponteiro; se \texttt{ref == 0}, seleciona o quadro como vítima e avança o ponteiro para a posição seguinte. A motivação de escolher o CLOCK é avaliar uma aproximação eficiente do LRU usada em sistemas operacionais reais, que exige apenas 1 bit de hardware por página em vez de carimbos de tempo de 64 bits. Esperamos que seu número de faltas fique muito próximo ao do LRU, superando com folga o FIFO e o Random.
+    \item \textbf{CLOCK / Segunda Chance (Frequência e Uso Recente):}
+    \begin{itemize}
+        \item \textit{Motivação:} Aproximar o comportamento do LRU utilizando apenas 1 bit de referência por página, eliminando a necessidade de atualizar carimbos de 64 bits a cada acesso e de varrer todos os quadros em toda substituição.
+        \item \textit{Metodologia de implementação:} Organiza o vetor de quadros como uma lista circular percorrida por um ponteiro persistente. Quando uma vítima é necessária, o algoritmo inspeciona o quadro atual: se o bit de referência estiver ativo ($1$), o quadro recebe uma segunda chance (seu bit é zerado para $0$ e o ponteiro avança circularmente); o laço prossegue até encontrar o primeiro quadro com bit de referência igual a $0$, que é retornado como vítima, deixando o ponteiro posicionado no quadro imediatamente seguinte para a próxima chamada.
+    \end{itemize}
 
-    \item \textbf{FIFO -- First-In, First-Out (Critério Livre):} Mantém um ponteiro circular (\texttt{ponteiro\_fifo}) que substitui sempre a página carregada há mais tempo na memória física, independentemente de quantas vezes ela foi lida ou escrita desde sua entrada. Escolhemos o FIFO para contrastar o tempo de chegada da página com a frequência real de uso (presente no CLOCK e no LRU) e para investigar em escala a Anomalia de Belady. Em programas com estruturas de dados persistentes acessadas durante toda a execução (como variáveis de controle e matrizes base), a expectativa é que o FIFO tenha desempenho ruim por descartar páginas muito utilizadas apenas por serem antigas.
+    \item \textbf{FIFO -- First-In, First-Out (Critério Livre):}
+    \begin{itemize}
+        \item \textit{Motivação:} Avaliar o impacto de substituir páginas puramente pela idade de carregamento na memória, ignorando sua frequência de leitura ou escrita, além de permitir a reprodução experimental da Anomalia de Belady.
+        \item \textit{Metodologia de implementação:} Como os quadros livres são preenchidos em ordem estritamente sequencial no início da simulação, a fila FIFO é implementada de forma exata em $O(1)$ por meio de um único ponteiro circular de substituição: a cada falta com memória cheia, o quadro apontado (o mais antigo presente na RAM) é escolhido como vítima e o ponteiro avança em módulo $Q$.
+    \end{itemize}
 
-    \item \textbf{Ótimo Teórico -- Belady's MIN (\texttt{opt}, Referência Teórica):} Como o simulador opera sobre arquivos de \textit{trace} conhecidos, pré-computamos em $O(N)$ o índice da próxima aparição futura de cada acesso quando o modo \texttt{opt} é selecionado, desalojando sempre o quadro cujo próximo acesso está mais distante no futuro (ou que não será mais referenciado). Embora não seja implementável em um sistema operacional real sem conhecimento prévio do futuro, incluí-lo nos gráficos permite visualizar a distância exata entre nossas políticas práticas (LRU e CLOCK) e o limite matemático mínimo de faltas de página.
-\end{enumerate}
+    \item \textbf{Ótimo de Belady -- \texttt{opt} (Referência Teórica):}
+    \begin{itemize}
+        \item \textit{Motivação:} Estabelecer o limite inferior absoluto de faltas de página que qualquer política de substituição poderia atingir para um dado arquivo de entrada e tamanho de memória.
+        \item \textit{Metodologia de implementação:} Como o algoritmo ótimo requer conhecer o futuro, sua execução realiza um pré-processamento linear $O(N)$ em duas passagens sobre o \textit{trace}. Primeiro, a sequência de $N$ acessos é carregada em memória; em seguida, percorrendo o vetor de trás para frente (do índice $N-1$ até $0$) com o auxílio de uma tabela auxiliar da última aparição vista de cada VPN, anota-se para cada acesso $i$ o índice exato de sua próxima referência futura (ou $\infty$, representado por \texttt{ULONG\_MAX}, caso a página não volte a ser usada). Durante a simulação, cada quadro armazena o índice do próximo acesso de sua página atual, e a substituição escolhe o quadro com o maior valor (o uso mais distante no futuro).
+    \end{itemize}
+\end{itemize}
 
 \subsection{Estruturas de Tabela de Páginas}
 
-Embora a organização da tabela de páginas não altere a sequência de acertos ou faltas da simulação, ela determina o consumo de memória do sistema operacional e a latência de tradução do endereço:
+Para investigar o compromisso entre consumo de memória e velocidade de consulta na tradução de endereços de 32 bits ($b = 32 - s$ bits de VPN), implementamos as quatro arquiteturas exigidas:
 
-\begin{itemize}
-    \item \textbf{Tabela Densa:} Vetor único de tamanho $2^{32 - s}$ indexado diretamente pelo VPN. Oferece busca em $O(1)$ com um único acesso à memória, mas aloca todo o espaço de endereçamento virtual antecipadamente (para páginas de 2 KB, exige $2^{21} \times 4\text{ bytes} = 8\text{ MB}$; para 4 KB, $4\text{ MB}$).
-    \item \textbf{Tabela Hierárquica de 2 Níveis:} Divide os bits do VPN ao meio ($\lfloor \text{bits}/2 \rfloor$ para o diretório de nível 1 e o restante para o nível 2). As sub-tabelas de nível 2 só são alocadas via \texttt{malloc} quando uma página daquela faixa de endereços é efetivamente mapeada.
-    \item \textbf{Tabela Hierárquica de 3 Níveis:} Divide o VPN em três fatias ($\text{nível 1}, \text{nível 2}, \text{nível 3}$), postergando a alocação tanto das tabelas intermediárias quanto das folhas. Reduz ainda mais o desperdício em espaços de endereçamento esparsos, em troca de três saltos de ponteiro por consulta.
-    \item \textbf{Tabela Invertida:} Em vez de escalar com o espaço virtual de 32 bits, possui exatamente uma entrada por quadro físico da RAM (\texttt{num\_quadros}), utilizando uma tabela hash com encadeamento interno (\texttt{inv\_hash\_head} e \texttt{inv\_frames}) indexada por \texttt{hash(vpn) \% num\_quadros}.
-\end{itemize}
+\begin{enumerate}
+    \item \textbf{Tabela Densa (1 Nível):} Implementada como um único vetor contíguo de $2^b$ inteiros alocado integralmente na inicialização e inicializado com $-1$ (página ausente). A busca, o mapeamento e o desmapeamento consistem em indexação direta pelo próprio \texttt{vpn} em $O(1)$.
+    \item \textbf{Tabela Hierárquica de 2 Níveis:} Divide os $b$ bits do VPN em duas metades: $b_1 = \lfloor b/2 \rfloor$ bits superiores para indexar o diretório de nível 1 e $b_2 = b - b_1$ bits inferiores para a tabela de nível 2 (para páginas de 4 KB, $10 + 10$ bits). Inicialmente, apenas o vetor de ponteiros de nível 1 é alocado com \texttt{calloc}. As sub-tabelas de nível 2 são alocadas sob demanda via \texttt{malloc} apenas quando uma página pertencente àquela entrada do diretório é mapeada pela primeira vez.
+    \item \textbf{Tabela Hierárquica de 3 Níveis:} Particiona os $b$ bits do VPN em três fatias ($b_1 = \lfloor b/3 \rfloor$, $b_2 = \lfloor b/3 \rfloor$ e $b_3 = b - b_1 - b_2$, resultando em $6 + 6 + 8$ bits para páginas de 4 KB). A tradução realiza três extrações por máscara de bits e deslocamento, alocando diretórios intermediários (nível 2) e tabelas folhas (nível 3) estritamente sob demanda.
+    \item \textbf{Tabela Invertida:} Dimensionada pelo número de quadros físicos $Q$ (e não pelo espaço virtual $2^b$). Foi implementada como uma tabela hash com encadeamento estático em vetor: um arranjo de cabeças de lista de tamanho $Q$ e um arranjo paralelo de $Q$ nós (um por quadro físico), onde cada nó guarda o \texttt{vpn} atualmente armazenado naquele quadro e o índice do próximo quadro na mesma lista de colisão. A função de dispersão multiplica o VPN pela constante áurea de Knuth ($\text{vpn} \times 2654435761 \bmod Q$), garantindo busca em tempo médio $O(1)$ e ocupação de memória proporcional apenas à RAM física.
+\end{enumerate}
 
 \section{Decisões de Projeto}
 
-Para resolver pontos abertos da especificação sem quebrar a compatibilidade com scripts de correção automática:
+Durante o desenvolvimento do simulador e da bateria experimental, adotamos as seguintes decisões de projeto:
 \begin{enumerate}
-    \item \textbf{Quinto argumento opcional:} O programa aceita exatamente os 4 argumentos padrão (\texttt{./simulador <alg> <arq> <pag> <mem>}), utilizando a tabela densa por padrão. Caso um quinto argumento seja fornecido (\texttt{densa}, \texttt{hier2}, \texttt{hier3} ou \texttt{invertida}), o simulador executa com a estrutura escolhida e exibe ao final o consumo exato de memória da tabela em bytes.
-    \item \textbf{Contabilização de páginas escritas:} Conforme especificado no enunciado, páginas modificadas (\texttt{dirty == 1}) somente incrementam o contador de páginas escritas no momento em que são desalojadas da memória física por uma substituição. Páginas sujas que permanecem na memória ao término do arquivo não geram escrita final.
-    \item \textbf{Desempate na carga inicial:} Enquanto há quadros físicos vazios, eles são preenchidos na ordem crescente de seus índices ($0, 1, \dots, N-1$).
+    \item \textbf{Implementação separada do Algoritmo Ótimo (\texttt{opt}):} A decisão de implementar o algoritmo Ótimo surgiu após a conclusão dos quatro algoritmos principais, quando analisávamos os primeiros gráficos e sentimos necessidade de um referencial teórico para avaliar quão próximos o LRU e o CLOCK estavam do melhor resultado matematicamente possível. Como o Ótimo exige pré-carregar toda a sequência futura de acessos (ao contrário das políticas reais que operam em \textit{streaming} linha a linha), isolamos sua rotina de pré-processamento na execução do arquivo: quando o simulador é chamado com \texttt{lru}, \texttt{clock}, \texttt{fifo} ou \texttt{random}, ele mantém o loop original de leitura direta sem alocar vetores de futuro; o pré-carregamento só é ativado quando o argumento \texttt{opt} é solicitado para fins de comparação nos gráficos.
+    \item \textbf{Seleção de tabela de páginas via 5º argumento opcional:} Para preservar total compatibilidade com a chamada padrão de 4 argumentos especificada no enunciado (\texttt{./simulador <alg> <arq> <pag> <mem>}), a tabela densa é adotada por padrão quando apenas 4 parâmetros são passados. Quando um quinto argumento opcional é informado (\texttt{densa}, \texttt{hier2}, \texttt{hier3} ou \texttt{invertida}), o simulador instancia a tabela correspondente e imprime uma linha adicional informando o total exato de bytes alocados pela estrutura.
+    \item \textbf{Regra de escrita de páginas sujas:} Seguindo estritamente o enunciado, páginas com \textit{dirty bit} ativo somente geram escrita em disco no instante em que são escolhidas como vítimas e substituídas. Páginas modificadas que permanecem residentes na memória ao final da simulação não são contabilizadas como escritas.
 \end{enumerate}
 
 \section{Análise de Desempenho}
-
-Os experimentos avaliaram os quatro programas reais fornecidos (\texttt{compilador.log}, \texttt{compressor.log}, \texttt{matriz.log} e \texttt{simulador.log}), cada um contendo exatamente $1.000.000$ de referências à memória, além de baterias sintéticas e comparativas adicionais.
 
 \subsection{Cenário 1: Crescimento da Memória Física (Páginas de 4 KB)}
 
@@ -83,7 +108,7 @@ Neste primeiro cenário, fixamos o tamanho da página em 4 KB e variamos a memó
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.98\textwidth]{results/cenario1_page_faults.png}
+    \includegraphics[width=1.0\textwidth]{results/cenario1_page_faults.png}
     \caption{Faltas de página em função do tamanho da memória física com páginas fixas de 4 KB (incluindo o limite teórico Ótimo).}
     \label{fig:cenario1}
 \end{figure}
@@ -121,20 +146,20 @@ Neste primeiro cenário, fixamos o tamanho da página em 4 KB e variamos a memó
 }
 \end{table}
 
-Os dados permitem extrair três observações centrais:
+Os resultados permitem extrair três conclusões principais:
 \begin{enumerate}
-    \item \textbf{Proximidade entre CLOCK, LRU e o Limite Ótimo:} Em todos os programas e tamanhos de memória, as curvas de \texttt{lru} (azul) e \texttt{clock} (verde) caminham quase sobrepostas. No \texttt{compilador.log} com 128 KB, o CLOCK apresenta apenas $3,9\%$ mais faltas que o LRU ($87.686$ contra $84.401$). Já o algoritmo \texttt{opt} (linha tracejada preta) atinge $55.802$ faltas, mostrando que nenhuma política online sem conhecimento do futuro pode baixar desse patamar e que o LRU/CLOCK capturam a maior parte do ganho possível sobre o Random ($106.655$).
-    \item \textbf{Penalidade severa do FIFO e do Random em loops matriciais:} A maior distância entre os algoritmos práticos ocorre em \texttt{matriz.log} sob memória restrita (128 KB). Enquanto o LRU gera $48.254$ faltas ($9.674$ escritas) e o CLOCK gera $53.025$ faltas ($11.140$ escritas), o FIFO salta para $81.638$ faltas e $18.172$ escritas ($69\%$ a mais de faltas e quase o dobro de tráfego de escrita em disco). Em operações de matrizes, blocos de linhas e variáveis acumuladoras são lidos e modificados repetidamente; como foram carregados no início da execução, o FIFO os elege como vítimas justamente enquanto ainda estão em uso ativo.
-    \item \textbf{Convergência e tamanho do Conjunto de Trabalho (\textit{Working Set}):} À medida que a memória cresce, todas as 5 curvas (incluindo o Ótimo) convergem para o mesmo piso de faltas compulsórias (\textit{cold misses}) quando o conjunto de trabalho cabe inteiro na RAM. No \texttt{compressor.log}, o conjunto de trabalho total é de apenas $317$ páginas de 4 KB ($\approx 1,24\text{ MB}$), estabilizando a partir de 2048 KB (e no \texttt{opt} já em 1024 KB com $317$ leituras). Nos demais programas, a convergência completa ocorre em 16384 KB ($2.852$ páginas únicas no \texttt{compilador}, $2.543$ na \texttt{matriz} e $3.890$ no \texttt{simulador}).
+    \item \textbf{Desempenho de CLOCK e LRU frente ao Limite Ótimo:} Em todos os programas e tamanhos de memória, as curvas de \texttt{lru} (azul) e \texttt{clock} (verde) permanecem praticamente coladas. No \texttt{compilador.log} com 128 KB, o CLOCK apresenta apenas $3,9\%$ mais faltas que o LRU ($87.686$ contra $84.401$). O algoritmo \texttt{opt} (curva tracejada preta) estabelece o piso teórico em $55.802$ faltas, evidenciando que o uso de 1 único bit de referência no CLOCK recupera quase toda a vantagem que o LRU obtém sobre o Random ($106.655$ faltas).
+    \item \textbf{Degradação severa do FIFO e do Random em loops matriciais:} A maior distância entre as políticas práticas ocorre em \texttt{matriz.log} sob memória restrita (128 KB). Enquanto o LRU gera $48.254$ faltas ($9.674$ escritas) e o CLOCK gera $53.025$ faltas ($11.140$ escritas), o FIFO salta para $81.638$ faltas e $18.172$ escritas ($69\%$ a mais de faltas e quase o dobro de escritas em disco). Em operações matriciais, blocos de linhas e variáveis acumuladoras são lidos e modificados repetidamente; como foram carregados no início da execução, o FIFO os elege como vítimas justamente enquanto ainda estão em uso ativo.
+    \item \textbf{Convergência e tamanho do Conjunto de Trabalho (\textit{Working Set}):} À medida que a memória cresce, todas as 5 curvas convergem para o mesmo piso de faltas compulsórias (\textit{cold misses}) quando o conjunto de trabalho passa a caber inteiro na RAM. No \texttt{compressor.log}, o conjunto de trabalho total é de apenas $317$ páginas de 4 KB ($\approx 1,24\text{ MB}$), estabilizando a partir de 2048 KB (e no \texttt{opt} já em 1024 KB com $317$ leituras). Nos demais programas, a convergência completa ocorre em 16384 KB ($2.852$ páginas únicas no \texttt{compilador}, $2.543$ na \texttt{matriz} e $3.890$ no \texttt{simulador}).
 \end{enumerate}
 
 \subsection{Cenário 2: Variação do Tamanho de Página (Memória Fixa em 1024 KB)}
 
-No segundo experimento, mantivemos a memória física fixa em 1024 KB e variamos o tamanho da página de 2 KB a 64 KB. Com memória total constante, dobrar o tamanho da página reduz pela metade a quantidade de quadros físicos disponíveis: de $512$ quadros (em 2 KB) para apenas $16$ quadros (em 64 KB). A Figura~\ref{fig:cenario2} e a Tabela~\ref{tab:cenario2} mostram os resultados.
+No segundo experimento, mantivemos a memória física fixa em 1024 KB e variamos o tamanho da página de 2 KB a 64 KB. Com memória total constante, dobrar o tamanho da página reduz pela metade a quantidade de quadros físicos disponíveis: de $512$ quadros (em 2 KB) para apenas $16$ quadros (em 64 KB). A Figura~\ref{fig:cenario2} e a Tabela~\ref{tab:cenario2} apresentam os resultados.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.98\textwidth]{results/cenario2_page_faults.png}
+    \includegraphics[width=1.0\textwidth]{results/cenario2_page_faults.png}
     \caption{Faltas de página com memória fixa em 1024 KB e tamanho de página variando de 2 KB a 64 KB.}
     \label{fig:cenario2}
 \end{figure}
@@ -176,11 +201,11 @@ No segundo experimento, mantivemos a memória física fixa em 1024 KB e variamos
 }
 \end{table}
 
-A variação do tamanho de página evidencia o compromisso clássico entre \textbf{localidade espacial} e \textbf{fragmentação interna / escassez de quadros}:
+A variação do tamanho de página evidencia o compromisso entre \textbf{localidade espacial} e \textbf{fragmentação interna / escassez de quadros}:
 \begin{enumerate}
-    \item \textbf{Aproveitamento de localidade espacial de 2 KB para 4 KB:} Na passagem de 2 KB para 4 KB no \texttt{compressor.log}, o número de faltas \textit{cai} de $419$ para $397$ no LRU e de $419$ para $317$ no Ótimo (e no \texttt{matriz.log} com Ótimo cai de $3.631$ para $3.572$). Quando a página dobra de 2 KB para 4 KB, cada leitura traz endereços vizinhos contíguos que são consumidos logo em seguida.
-    \item \textbf{Degradação por redução do número de quadros e fragmentação interna:} A partir de 8 KB (e de forma crítica em 32 KB e 64 KB), o número de faltas cresce acentuadamente em todos os programas. Com páginas de 64 KB, a memória de 1024 KB possui apenas \textbf{16 quadros físicos}. No \texttt{compilador.log}, que faz acessos espalhados em árvores sintáticas e tabelas de símbolos, carregar blocos de 64 KB traz uma grande quantidade de bytes que não serão utilizados (fragmentação interna) e reduz a quantidade de regiões simultâneas que podem residir na RAM, quintuplicando as faltas no LRU (de $15.330$ em 2 KB para $77.837$ em 64 KB).
-    \item \textbf{Colapso em \texttt{matriz.log} com 64 KB e inversão entre FIFO e Random:} No \texttt{matriz.log}, passar de 32 KB (32 quadros) para 64 KB (16 quadros) faz as faltas no LRU saltarem quase quatro vezes (de $32.282$ para $115.886$). Isso indica que o laço interno do cálculo matricial toca simultaneamente em mais de 16 faixas de 64 KB, causando \textit{thrashing}. Nesse ponto extremo (64 KB), observa-se inclusive que o \textbf{Random} ($131.729$ faltas) supera o \textbf{FIFO} ($137.751$ faltas): quando um percurso cíclico sobre matrizes excede a capacidade da fila do FIFO, ele substitui sistematicamente a página que será pedida na próxima iteração, enquanto a escolha aleatória evita essa sincronização destrutiva.
+    \item \textbf{Aproveitamento de localidade espacial de 2 KB para 4 KB:} Na passagem de 2 KB para 4 KB no \texttt{compressor.log}, o número de faltas \textit{cai} de $419$ para $397$ no LRU e de $419$ para $317$ no Ótimo (e no \texttt{matriz.log} com Ótimo cai de $3.631$ para $3.572$). Quando a página dobra de 2 KB para 4 KB, cada leitura carrega endereços vizinhos contíguos que são acessados logo em seguida.
+    \item \textbf{Degradação por redução do número de quadros e fragmentação interna:} A partir de 8 KB (e de forma crítica em 32 KB e 64 KB), o número de faltas cresce acentuadamente em todos os programas. Com páginas de 64 KB, a memória de 1024 KB possui apenas \textbf{16 quadros físicos}. No \texttt{compilador.log}, que realiza acessos espalhados em árvores sintáticas e tabelas de símbolos, carregar blocos de 64 KB traz grande quantidade de bytes que não serão utilizados (fragmentação interna) e reduz o número de regiões distintas que podem coexistir na RAM, quintuplicando as faltas no LRU (de $15.330$ em 2 KB para $77.837$ em 64 KB).
+    \item \textbf{Colapso em \texttt{matriz.log} com 64 KB e inversão entre FIFO e Random:} No \texttt{matriz.log}, passar de 32 KB (32 quadros) para 64 KB (16 quadros) faz as faltas no LRU saltarem quase quatro vezes (de $32.282$ para $115.886$). Isso indica que o laço interno do cálculo matricial toca simultaneamente em mais de 16 faixas de 64 KB, causando \textit{thrashing}. Nesse ponto extremo (64 KB), observa-se inclusive que o \textbf{Random} ($131.729$ faltas) supera o \textbf{FIFO} ($137.751$ faltas): quando um percurso cíclico sobre matrizes excede a capacidade da fila do FIFO, ele substitui sistematicamente a página que será pedida na próxima iteração, enquanto a escolha aleatória quebra essa sincronização destrutiva.
 \end{enumerate}
 
 \subsection{Cenário 3: Estruturas de Tabela de Páginas e Cruzamento Algoritmo $\times$ Tabela}
@@ -207,7 +232,7 @@ Para avaliar o impacto da estrutura da tabela de páginas, medimos tanto a memó
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.98\textwidth]{results/cenario3_tabelas.png}
+    \includegraphics[width=1.0\textwidth]{results/cenario3_tabelas.png}
     \caption{Memória alocada nos 4 programas por tipo de tabela (esquerda) e tempo de execução cruzando cada algoritmo de substituição com as 4 tabelas (direita).}
     \label{fig:cenario3}
 \end{figure}
@@ -221,11 +246,11 @@ Os resultados destacam três aspectos fundamentais:
 
 \subsection{Experimento Adicional 1: Investigação em Escala da Anomalia de Belady}
 
-Em vez de observar a Anomalia de Belady apenas em um teste estático de 12 linhas, construímos um gerador paramétrico de traces (\texttt{tests/trace\_belady\_N.log}, com $N \in \{500, 2.000, 10.000, 50.000\}$ acessos) que alterna fases cíclicas sobre janelas de $k \in \{5, 7, 9, 11, 13, 15\}$ páginas virtuais. Para cada tamanho de entrada $N$, executamos os algoritmos variando a memória passo a passo de $3$ até $32$ quadros físicos, contando quantas vezes a adição de um quadro físico extra ($Q \rightarrow Q+1$) provocou \textbf{aumento} no número de faltas de página. A Figura~\ref{fig:belady} e a Tabela~\ref{tab:belady} mostram os resultados.
+Para investigar a Anomalia de Belady de maneira sistemática (observando quantas vezes ela ocorre conforme aumentamos o tamanho da entrada e o número de quadros), construímos um gerador paramétrico de traces (\texttt{tests/trace\_belady\_N.log}, com $N \in \{500, 2.000, 10.000, 50.000\}$ acessos) que alterna fases cíclicas sobre janelas de $k \in \{5, 7, 9, 11, 13, 15\}$ páginas virtuais. Para cada tamanho de entrada $N$, executamos os algoritmos variando a memória passo a passo de $3$ até $32$ quadros físicos, contando quantas vezes a adição de um quadro físico extra ($Q \rightarrow Q+1$) provocou \textbf{aumento} no número de faltas de página. A Figura~\ref{fig:belady} e a Tabela~\ref{tab:belady} mostram os resultados.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.98\textwidth]{results/cenario4_belady.png}
+    \includegraphics[width=1.0\textwidth]{results/cenario4_belady.png}
     \caption{Curva em dente-de-serra exibindo 6 saltos de Anomalia de Belady no FIFO e CLOCK para $N=10.000$ (esquerda) e contagem de ocorrências por tamanho de entrada (direita).}
     \label{fig:belady}
 \end{figure}
@@ -248,35 +273,35 @@ Em vez de observar a Anomalia de Belady apenas em um teste estático de 12 linha
 }
 \end{table}
 
-Os resultados revelam comportamentos teóricos importantes:
+Os resultados revelam comportamentos importantes:
 \begin{enumerate}
-    \item \textbf{Múltiplas ocorrências e efeito dente-de-serra no FIFO e no CLOCK:} Na Figura~\ref{fig:belady} (esquerda), vemos que as curvas do FIFO e do CLOCK formam uma escada em ``dente-de-serra'' com \textbf{6 episódios de Anomalia de Belady} (nas passagens $3\rightarrow4$, $5\rightarrow6$, $7\rightarrow8$, $9\rightarrow10$, $11\rightarrow12$ e $13\rightarrow14$ quadros). Como durante esses sub-blocos nenhuma página recebe segunda chance antes de todas as demais também terem \texttt{ref == 1}, o ponteiro do CLOCK dá uma volta inteira zerando os bits e degenera exatamente no FIFO, sofrendo as mesmas anomalias!
+    \item \textbf{Crescimento das ocorrências com a entrada e efeito dente-de-serra no FIFO e no CLOCK:} Conforme a sequência de entrada cresce de $N=500$ para $N=10.000$ e $50.000$ acessos (alcançando janelas cíclicas maiores), o número de transições $Q \rightarrow Q+1$ que sofrem a Anomalia de Belady sobe de $2$ para \textbf{6 episódios distintos} ($3\rightarrow4$, $5\rightarrow6$, $7\rightarrow8$, $9\rightarrow10$, $11\rightarrow12$ e $13\rightarrow14$ quadros). Mais interessante ainda é notar que o \textbf{CLOCK} sofre exatamente os mesmos saltos que o FIFO: quando as páginas da janela chegam sem reuso intermediário antes da substituição, todos os quadros estão com \texttt{ref == 1}, fazendo o ponteiro do relógio dar uma volta completa zerando os bits e degenerando exatamente na política FIFO.
     \item \textbf{Imunidade absoluta dos Algoritmos de Pilha (\textit{Stack Algorithms}):} Tanto o \textbf{LRU} quanto o \textbf{Ótimo} apresentaram \textbf{zero ocorrências} da anomalia em todos os tamanhos de trace ($N=500$ a $N=50.000$). Como ambos satisfazem a propriedade de inclusão de Mattson (o conjunto de páginas na memória com $Q$ quadros em qualquer instante é sempre um subconjunto estrito do conjunto com $Q+1$ quadros), suas curvas são estritamente decrescentes.
 \end{enumerate}
 
 \subsection{Experimento Adicional 2: Impacto do Dirty Bit vs. Cenário ``100\% Dirty''}
 
-Para responder como o \textbf{LRU} e o \textbf{CLOCK} se comparam caso o hardware não possuísse verificação de \textit{dirty bit} (ou seja, se toda página fosse tratada como suja ao ser substituída, exigindo escrita em disco em $100\%$ das substituições: $\text{Escritas}_{\text{sem\_dirty}} = \text{Faltas} - \text{Quadros}$), comparamos o volume de escritas nesse cenário contra as escritas reais filtradas pelo \textit{dirty bit}. A Figura~\ref{fig:dirty} ilustra essa comparação.
+Para investigar como o \textbf{LRU} e o \textbf{CLOCK} se comparam caso todas as páginas fossem sujas (isto é, se não existisse a verificação do \textit{dirty bit} e toda substituição após encher a memória exigisse escrita em disco: $\text{Escritas}_{\text{100\% dirty}} = \text{Faltas} - \text{Quadros}$), comparamos o volume de escritas nesse cenário contra as escritas reais filtradas pelo \textit{dirty bit}. A Figura~\ref{fig:dirty} ilustra essa análise.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.98\textwidth]{results/cenario5_dirty_bit.png}
+    \includegraphics[width=1.0\textwidth]{results/cenario5_dirty_bit.png}
     \caption{Volume de escritas em disco em \texttt{matriz.log} com e sem verificação de \textit{dirty bit} (esquerda) e percentual de substituições poupadas de escrita em 128 KB (direita).}
     \label{fig:dirty}
 \end{figure}
 
 A análise mostra que:
 \begin{enumerate}
-    \item \textbf{Economia massiva de I/O proporcionada pelo Dirty Bit:} Sem o bit de modificação (curvas tracejadas na esquerda da Figura~\ref{fig:dirty}), toda página desalojada em \texttt{matriz.log} (128 KB) precisaria ser copiada de volta ao disco, gerando $48.222$ escritas no LRU e $52.993$ no CLOCK. Com a verificação do \textit{dirty bit} (curvas cheias), as escritas caem para $9.674$ no LRU e $11.140$ no CLOCK --- uma \textbf{redução de $79,9\%$ e $79,0\%$ nas operações de escrita em disco}. No \texttt{compilador.log} (onde a maioria das páginas é de código ou tabelas de leitura), a economia chega a \textbf{$86,1\%$}.
-    \item \textbf{Comparação LRU vs. CLOCK com páginas sujas:} Quando todas as páginas são tratadas como \textit{dirty}, o número de escritas em disco passa a ser governado exclusivamente pela taxa de faltas ($\text{Faltas} - Q$), mantendo a diferença entre CLOCK e LRU em apenas $6,4\%$ no \texttt{compilador.log} e $9,9\%$ no \texttt{matriz.log} (128 KB). Porém, com o \textit{dirty bit} ativo no trace real do \texttt{matriz.log} (128 KB), a diferença percentual nas escritas sobe para $15,2\%$ ($11.140$ escritas no CLOCK contra $9.674$ no LRU). Isso acontece porque páginas que sofrem escrita (como acumuladores e matrizes de destino) costumam ter altíssima localidade temporal: o LRU mantém essas páginas sujas protegidas no topo da pilha por mais tempo, enquanto a granularidade de 1 único bit do CLOCK ocasionalmente desaloja uma página suja após uma varredura do ponteiro, forçando sua escrita precoce em disco.
+    \item \textbf{Economia de escritas proporcionada pelo Dirty Bit:} Sem o bit de modificação (curvas tracejadas à esquerda na Figura~\ref{fig:dirty}), toda página desalojada em \texttt{matriz.log} (128 KB) precisaria ser copiada de volta ao disco, gerando $48.222$ escritas no LRU e $52.993$ no CLOCK. Com a verificação do \textit{dirty bit} (curvas cheias), as escritas caem para $9.674$ no LRU e $11.140$ no CLOCK --- uma \textbf{redução de $79,9\%$ e $79,0\%$ nas operações de escrita em disco}. No \texttt{compilador.log} (onde a maioria das páginas é de código ou tabelas apenas de leitura), a economia chega a \textbf{$86,1\%$}.
+    \item \textbf{Comparação LRU vs. CLOCK com e sem Dirty Bit:} Se todas as páginas fossem tratadas como \textit{dirty}, o número de escritas em disco seria idêntico ao número de substituições ($\text{Faltas} - Q$), fazendo com que o CLOCK gerasse apenas $6,4\%$ mais escritas que o LRU no \texttt{compilador.log} e $9,9\%$ a mais no \texttt{matriz.log} (em 128 KB). Entretanto, quando o \textit{dirty bit} real está ativo em \texttt{matriz.log} (128 KB), a desvantagem do CLOCK nas escritas sobe para \textbf{$15,2\%$} ($11.140$ escritas no CLOCK contra $9.674$ no LRU). Isso ocorre porque páginas que sofrem escrita (como acumuladores e matrizes de saída) possuem altíssima localidade temporal: o LRU mantém essas páginas sujas protegidas no topo por mais tempo, enquanto a granularidade de 1 único bit do CLOCK ocasionalmente desaloja uma página suja após uma varredura do ponteiro, forçando sua escrita precoce em disco.
 \end{enumerate}
 
 \section{Conclusão}
 
 Os experimentos realizados confirmaram as hipóteses teóricas sobre gerência de memória virtual e permitiram quantificar seus efeitos em traces reais e sintéticos. A inclusão do algoritmo \textbf{Ótimo de Belady (\texttt{opt})} estabeleceu o limite inferior de faltas de página em cada cenário, demonstrando que o \textbf{LRU} e o \textbf{CLOCK} operam muito próximos um do outro (diferença de apenas $3\%$ a $9\%$ em páginas lidas) e capturam a maior parte do ganho possível sobre políticas sem histórico de uso (\textbf{FIFO} e \textbf{Random}), que chegaram a gerar quase $70\%$ mais faltas e o dobro de escritas no trace \texttt{matriz.log}.
 
-Nossos experimentos adicionais comprovaram em escala a diferença estrutural entre algoritmos de fila e algoritmos de pilha: enquanto o FIFO e o CLOCK exibiram até 6 episódios de Anomalia de Belady (curva em dente-de-serra) conforme o número de quadros cresceu de 3 para 32, o LRU e o Ótimo mantiveram monotonicidade estrita com zero anomalias. Além disso, a análise do \textit{dirty bit} revelou que a presença de 1 bit de modificação economiza entre $67\%$ e $86\%$ de todas as escritas em disco nos programas testados, e que o LRU protege páginas sujas ligeiramente melhor que o CLOCK simples.
+Nossos experimentos adicionais comprovaram em escala a diferença estrutural entre algoritmos de fila e algoritmos de pilha: enquanto o FIFO e o CLOCK exibiram até 6 episódios de Anomalia de Belady (curva em dente-de-serra) conforme o número de quadros cresceu de 3 para 32, o LRU e o Ótimo mantiveram monotonicidade estrita com zero anomalias. Além disso, a análise do \textit{dirty bit} revelou que a presença de 1 bit de modificação economiza entre $67\%$ e $86\%$ de todas as escritas em disco nos programas testados, e que o LRU protege páginas sujas melhor que o CLOCK simples (cuja diferença em relação ao LRU sobe de $9,9\%$ no cenário 100\% dirty para $15,2\%$ com o \textit{dirty bit} real em \texttt{matriz.log}).
 
-Por fim, o estudo de variação do tamanho de página (2 KB a 64 KB) mostrou o colapso de desempenho (\textit{thrashing}) quando páginas excessivamente grandes reduzem o número de quadros físicos para apenas 16, e a avaliação das tabelas de páginas demonstrou a superioridade espacial das tabelas hierárquicas (economia de até $98,4\%$) e da tabela invertida com hash ($3,1\text{ KB}$ contra $4\text{ MB}$ da tabela densa). Como trabalho futuro, o algoritmo CLOCK pode ser estendido para a variante \textit{Enhanced Second-Chance} $\text{CLOCK}-(R,M)$, inspecionando o par $(\texttt{ref}, \texttt{dirty})$ para preferir vítimas limpas $(0,0)$ antes de desalojar páginas modificadas $(0,1)$.
+Por fim, o estudo de variação do tamanho de página (2 KB a 64 KB) mostrou o colapso de desempenho (\textit{thrashing}) quando páginas excessivamente grandes reduzem o número de quadros físicos para apenas 16, e a avaliação das tabelas de páginas demonstrou a superioridade espacial das tabelas hierárquicas (economia de até $98,4\%$) e da tabela invertida com hash ($3,1\text{ KB}$ contra $4\text{ MB}$ da tabela densa). Como trabalho futuro, o algoritmo CLOCK pode ser estendido para a variante \textit{Enhanced Second-Chance} $\text{CLOCK}-(R,M)$, inspecionando o par $(\text{referência}, \text{modificação})$ para preferir vítimas limpas $(0,0)$ antes de desalojar páginas sujas $(0,1)$.
 
 \end{document}
