@@ -3,6 +3,6 @@ tp2virtual
 *.o
 src/*.o
 obj/
-results/
+
 .venv/
 PLANEJAMENTO.md

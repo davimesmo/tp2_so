@@ -1,0 +1,17 @@
+programa,tabela,tam_pagina_kb,tam_memoria_kb,memoria_tabela_bytes,tempo_segundos
+compilador.log,densa,4,1024,4194392,0.1676
+compilador.log,hier2,4,1024,680024,0.1865
+compilador.log,hier3,4,1024,410712,0.1714
+compilador.log,invertida,4,1024,3160,0.1725
+compressor.log,densa,4,1024,4194392,0.1468
+compressor.log,hier2,4,1024,168024,0.1431
+compressor.log,hier3,4,1024,68696,0.1366
+compressor.log,invertida,4,1024,3160,0.137
+matriz.log,densa,4,1024,4194392,0.1341
+matriz.log,hier2,4,1024,835672,0.1354
+matriz.log,hier3,4,1024,492632,0.1402
+matriz.log,invertida,4,1024,3160,0.142
+simulador.log,densa,4,1024,4194392,0.1339
+simulador.log,hier2,4,1024,991320,0.1428
+simulador.log,hier3,4,1024,652376,0.1402
+simulador.log,invertida,4,1024,3160,0.1895
