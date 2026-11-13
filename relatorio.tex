@@ -279,7 +279,7 @@ Os resultados revelam comportamentos importantes:
     \item \textbf{Imunidade absoluta dos Algoritmos de Pilha (\textit{Stack Algorithms}):} Tanto o \textbf{LRU} quanto o \textbf{Ótimo} apresentaram \textbf{zero ocorrências} da anomalia em todos os tamanhos de trace ($N=500$ a $N=50.000$). Como ambos satisfazem a propriedade de inclusão de Mattson (o conjunto de páginas na memória com $Q$ quadros em qualquer instante é sempre um subconjunto estrito do conjunto com $Q+1$ quadros), suas curvas são estritamente decrescentes.
 \end{enumerate}
 
-\subsection{Experimento Adicional 2: Impacto do Dirty Bit vs. Cenário ``100\% Dirty''}
+\subsection{Experimento Adicional 2: Impacto do Dirty Bit}
 
 Para investigar como o \textbf{LRU} e o \textbf{CLOCK} se comparam caso todas as páginas fossem sujas (isto é, se não existisse a verificação do \textit{dirty bit} e toda substituição após encher a memória exigisse escrita em disco: $\text{Escritas}_{\text{100\% dirty}} = \text{Faltas} - \text{Quadros}$), comparamos o volume de escritas nesse cenário contra as escritas reais filtradas pelo \textit{dirty bit}. A Figura~\ref{fig:dirty} ilustra essa análise.
 
