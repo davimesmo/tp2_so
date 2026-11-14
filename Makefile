@@ -17,9 +17,6 @@ obj:
 	mkdir -p obj
 
 clean:
-	rm -rf obj $(TARGET) tp2virtual tp2_entrega.tar.gz
+	rm -rf obj $(TARGET) tp2virtual
 
-pack: clean
-	tar -czvf tp2_entrega.tar.gz Makefile src/ include/ tests/ RELATORIO.md
-
-.PHONY: all clean pack
+.PHONY: all clean
