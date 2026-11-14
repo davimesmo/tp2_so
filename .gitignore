@@ -1,8 +1,8 @@
 simulador
 tp2virtual
 *.o
-src/*.o
 obj/
-
 .venv/
 PLANEJAMENTO.md
+*.log
+!tests/*.log

@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
 
     MMU *mmu = mmu_criar(algoritmo, tam_pagina_kb, tam_memoria_kb, tipo_tabela);
     if (!mmu) {
-        fprintf(stderr, "Erro ao inicializar MMU.\n");
+        fprintf(stderr, "Erro ao iniciar o MMU.\n");
         fclose(arquivo);
         return EXIT_FAILURE;
     }
@@ -53,7 +53,7 @@ int main(int argc, char *argv[]) {
         mmu_processar_acesso(mmu, addr, rw);
     }
 
-    printf("Executando o simulador...\n");
+    printf("*** Executando o simulador ***\n");
     printf("Arquivo de entrada: %s\n", nome_arquivo);
     printf("Tamanho da memória: %u KB\n", tam_memoria_kb);
     printf("Tamanho das páginas: %u KB\n", tam_pagina_kb);
@@ -62,9 +62,9 @@ int main(int argc, char *argv[]) {
     printf("Páginas lidas: %lu\n", mmu->paginas_lidas);
     printf("Páginas escritas: %lu\n", mmu->paginas_escritas);
 
-    if (argc >= 6) {
+    if (argc >= 6) 
         printf("Memória da tabela: %zu bytes\n", tabela_memoria_usada(mmu->tabela));
-    }
+    
 
     fclose(arquivo);
     mmu_destruir(mmu);
