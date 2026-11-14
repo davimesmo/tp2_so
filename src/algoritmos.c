@@ -1,24 +1,5 @@
 #include "algoritmos.h"
 #include <stdlib.h>
-/*
- * 
- * Cada função abaixo deve retornar o índice do quadro físico que será
- * substituído (a "vítima"), isto é, um inteiro no intervalo [0, mmu->num_quadros - 1].
- *
- * Campos úteis disponíveis em cada quadro (mmu->quadros[i]):
- *   - mmu->quadros[i].vpn           : Número da página virtual atualmente mapeada
- *   - mmu->quadros[i].ref           : Bit de referência (1 se acessado recentemente, 0 caso contrário)
- *   - mmu->quadros[i].dirty         : Bit de modificação (1 se sofreu escrita, 0 se apenas leitura)
- *   - mmu->quadros[i].ultimo_acesso : Timestamp lógico do último acesso (usado por LRU)
- *   - mmu->quadros[i].tempo_carga   : Timestamp lógico de quando a página foi carregada (usado por FIFO)
- *
- * Campos úteis na MMU (mmu):
- *   - mmu->num_quadros              : Quantidade total de quadros físicos na memória
- *   - mmu->ponteiro_clock           : Índice circular para o algoritmo CLOCK
- *   - mmu->ponteiro_fifo            : Índice circular / fila para o algoritmo FIFO
- *   - mmu->total_acessos            : Contador global de acessos à memória
- */
-
 
 // Politica Random
 int random_substituir(MMU *mmu) {
@@ -41,7 +22,7 @@ int lru_substituir(MMU *mmu) {
 }
 
 
-  //Politica CLOCK:
+ //Politica CLOCK
 int clock_substituir(MMU *mmu) {
     int clock = 0;
     while( 1 == 1){
@@ -59,7 +40,7 @@ int clock_substituir(MMU *mmu) {
 }
 
 
-// Politica FIFO (First In, First Out):
+// Politica FIFO
 int fifo_substituir(MMU *mmu) {
     int fifo = mmu->ponteiro_fifo;
     mmu->ponteiro_fifo = (mmu->ponteiro_fifo + 1) % mmu->num_quadros;

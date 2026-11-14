@@ -34,7 +34,8 @@ static unsigned int hash_vpn(unsigned int vpn, int num_quadros) {
 
 TabelaPaginas *tabela_criar(TipoTabela tipo, unsigned int bits_vpn, int num_quadros) {
     TabelaPaginas *t = (TabelaPaginas *)calloc(1, sizeof(TabelaPaginas));
-    if (!t) return NULL;
+    if (!t) 
+        return NULL;
 
     t->tipo = tipo;
     t->bits_vpn = bits_vpn;
@@ -44,9 +45,10 @@ TabelaPaginas *tabela_criar(TipoTabela tipo, unsigned int bits_vpn, int num_quad
     if (tipo == TABELA_DENSA) {
         size_t qtd = (size_t)1 << bits_vpn;
         t->densa_entradas = (int *)malloc(qtd * sizeof(int));
-        for (size_t i = 0; i < qtd; i++) {
+        
+        for (size_t i = 0; i < qtd; i++) 
             t->densa_entradas[i] = -1;
-        }
+        
         t->memoria_usada += qtd * sizeof(int);
     } 
     else if (tipo == TABELA_HIER2) {
@@ -82,17 +84,19 @@ TabelaPaginas *tabela_criar(TipoTabela tipo, unsigned int bits_vpn, int num_quad
 }
 
 int tabela_buscar(TabelaPaginas *tabela, unsigned int vpn) {
-    if (!tabela) return -1;
+    if (!tabela) 
+        return -1;
 
-    if (tabela->tipo == TABELA_DENSA) {
+    if (tabela->tipo == TABELA_DENSA)
         return tabela->densa_entradas[vpn];
-    }
+    
 
     if (tabela->tipo == TABELA_HIER2) {
         unsigned int idx1 = vpn >> tabela->h2_bits_l2;
         unsigned int idx2 = vpn & (((unsigned int)1 << tabela->h2_bits_l2) - 1);
 
-        if (!tabela->h2_l1[idx1]) return -1;
+        if (!tabela->h2_l1[idx1]) 
+            return -1;
         return tabela->h2_l1[idx1][idx2];
     }
 
@@ -102,8 +106,10 @@ int tabela_buscar(TabelaPaginas *tabela, unsigned int vpn) {
         unsigned int idx2 = (vpn >> tabela->h3_bits_l3) & (((unsigned int)1 << tabela->h3_bits_l2) - 1);
         unsigned int idx3 = vpn & (((unsigned int)1 << tabela->h3_bits_l3) - 1);
 
-        if (!tabela->h3_l1[idx1]) return -1;
-        if (!tabela->h3_l1[idx1][idx2]) return -1;
+        if (!tabela->h3_l1[idx1]) 
+            return -1;
+        if (!tabela->h3_l1[idx1][idx2]) 
+            return -1;
         return tabela->h3_l1[idx1][idx2][idx3];
     }
 
@@ -111,9 +117,9 @@ int tabela_buscar(TabelaPaginas *tabela, unsigned int vpn) {
         unsigned int h = hash_vpn(vpn, tabela->num_quadros);
         int curr = tabela->inv_hash_head[h];
         while (curr != -1) {
-            if (tabela->inv_frames[curr].vpn == vpn) {
+            if (tabela->inv_frames[curr].vpn == vpn)
                 return curr;
-            }
+            
             curr = tabela->inv_frames[curr].next;
         }
         return -1;
@@ -123,7 +129,8 @@ int tabela_buscar(TabelaPaginas *tabela, unsigned int vpn) {
 }
 
 void tabela_mapear(TabelaPaginas *tabela, unsigned int vpn, int frame_id) {
-    if (!tabela) return;
+    if (!tabela) 
+        return;
 
     if (tabela->tipo == TABELA_DENSA) {
         tabela->densa_entradas[vpn] = frame_id;
@@ -135,9 +142,9 @@ void tabela_mapear(TabelaPaginas *tabela, unsigned int vpn, int frame_id) {
         if (!tabela->h2_l1[idx1]) {
             size_t qtd_l2 = (size_t)1 << tabela->h2_bits_l2;
             tabela->h2_l1[idx1] = (int *)malloc(qtd_l2 * sizeof(int));
-            for (size_t i = 0; i < qtd_l2; i++) {
+            for (size_t i = 0; i < qtd_l2; i++)
                 tabela->h2_l1[idx1][i] = -1;
-            }
+            
             tabela->memoria_usada += qtd_l2 * sizeof(int);
         }
         tabela->h2_l1[idx1][idx2] = frame_id;
@@ -157,9 +164,9 @@ void tabela_mapear(TabelaPaginas *tabela, unsigned int vpn, int frame_id) {
         if (!tabela->h3_l1[idx1][idx2]) {
             size_t qtd_l3 = (size_t)1 << tabela->h3_bits_l3;
             tabela->h3_l1[idx1][idx2] = (int *)malloc(qtd_l3 * sizeof(int));
-            for (size_t i = 0; i < qtd_l3; i++) {
+            for (size_t i = 0; i < qtd_l3; i++)
                 tabela->h3_l1[idx1][idx2][i] = -1;
-            }
+            
             tabela->memoria_usada += qtd_l3 * sizeof(int);
         }
 
@@ -174,7 +181,8 @@ void tabela_mapear(TabelaPaginas *tabela, unsigned int vpn, int frame_id) {
 }
 
 void tabela_desmapear(TabelaPaginas *tabela, unsigned int vpn) {
-    if (!tabela) return;
+    if (!tabela) 
+        return;
 
     if (tabela->tipo == TABELA_DENSA) {
         tabela->densa_entradas[vpn] = -1;
@@ -217,7 +225,8 @@ void tabela_desmapear(TabelaPaginas *tabela, unsigned int vpn) {
 }
 
 void tabela_destruir(TabelaPaginas *tabela) {
-    if (!tabela) return;
+    if (!tabela) 
+        return;
 
     if (tabela->tipo == TABELA_DENSA) {
         free(tabela->densa_entradas);
@@ -255,6 +264,7 @@ void tabela_destruir(TabelaPaginas *tabela) {
 }
 
 size_t tabela_memoria_usada(TabelaPaginas *tabela) {
-    if (!tabela) return 0;
+    if (!tabela) 
+        return 0;
     return tabela->memoria_usada;
 }
