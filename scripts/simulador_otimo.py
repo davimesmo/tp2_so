@@ -1,8 +1,8 @@
+#!/usr/bin/env python3
 import os
 import sys
 import time
 import csv
-import subprocess
 
 PROGRAMAS = [
     "compilador.log",
@@ -13,15 +13,14 @@ PROGRAMAS = [
 
 TAM_MEMORIA_C1 = [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
 TAM_PAGINA_C2 = [2, 4, 8, 16, 32, 64]
-TABELAS = ["densa", "hier2", "hier3", "invertida"]
 
-CACHE_TRACES = {}
+CACHE_ARQUIVOS = {}
 
 
-def carregar_trace(caminho_arquivo):
+def carregar_arquivo(caminho_arquivo):
     """Lê o arquivo de log uma vez e retorna listas de endereços (int) e operações ('R'/'W')."""
-    if caminho_arquivo in CACHE_TRACES:
-        return CACHE_TRACES[caminho_arquivo]
+    if caminho_arquivo in CACHE_ARQUIVOS:
+        return CACHE_ARQUIVOS[caminho_arquivo]
 
     addrs = []
     rws = []
@@ -31,7 +30,7 @@ def carregar_trace(caminho_arquivo):
             if len(partes) >= 2:
                 addrs.append(int(partes[0], 16))
                 rws.append(partes[1].upper())
-    CACHE_TRACES[caminho_arquivo] = (addrs, rws)
+    CACHE_ARQUIVOS[caminho_arquivo] = (addrs, rws)
     return addrs, rws
 
 
@@ -52,7 +51,6 @@ def simular_otimo_dados(addrs, rws, tam_pagina_kb, tam_memoria_kb):
     n = len(addrs)
     vpns = [addr >> shift_s for addr in addrs]
 
-    # Pré-processamento reverso O(N): calcula o índice da próxima aparição futura de cada acesso
     INF = n + 1
     proximos_acessos = [INF] * n
     ultima_aparicao = {}
@@ -62,7 +60,6 @@ def simular_otimo_dados(addrs, rws, tam_pagina_kb, tam_memoria_kb):
         proximos_acessos[i] = ultima_aparicao.get(vpn, INF)
         ultima_aparicao[vpn] = i
 
-    # Estruturas da MMU (idênticas ao simulador em C)
     quadros_vpn = [0] * num_quadros
     quadros_dirty = [0] * num_quadros
     quadros_prox = [0] * num_quadros
@@ -80,20 +77,17 @@ def simular_otimo_dados(addrs, rws, tam_pagina_kb, tam_memoria_kb):
         frame_id = tabela_vpn_para_quadro.get(vpn, -1)
 
         if frame_id != -1:
-            # Page Hit
             quadros_prox[frame_id] = prox
             if rw == "W":
                 quadros_dirty[frame_id] = 1
             continue
 
-        # Page Fault
         paginas_lidas += 1
 
         if quadros_ocupados < num_quadros:
             frame_id = quadros_ocupados
             quadros_ocupados += 1
         else:
-            # Escolhe o quadro cujo próximo acesso está mais distante no futuro
             vitima = 0
             mais_distante = quadros_prox[0]
             for q in range(1, num_quadros):
@@ -121,39 +115,10 @@ def simular_otimo_dados(addrs, rws, tam_pagina_kb, tam_memoria_kb):
 
 def simular_otimo_arquivo(caminho_arquivo, tam_pagina_kb, tam_memoria_kb):
     t0 = time.time()
-    addrs, rws = carregar_trace(caminho_arquivo)
+    addrs, rws = carregar_arquivo(caminho_arquivo)
     res = simular_otimo_dados(addrs, rws, tam_pagina_kb, tam_memoria_kb)
     res["tempo_segundos"] = round(time.time() - t0, 4)
     return res
-
-
-def executar_simulador_c(algoritmo, arquivo, tam_pagina, tam_memoria, tabela=None):
-    cmd = ["./simulador", algoritmo, arquivo, str(tam_pagina), str(tam_memoria)]
-    if tabela:
-        cmd.append(tabela)
-
-    t_inicio = time.time()
-    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    t_fim = time.time()
-
-    paginas_lidas = 0
-    paginas_escritas = 0
-    memoria_tabela = 0
-
-    for linha in res.stdout.splitlines():
-        if "Páginas lidas:" in linha:
-            paginas_lidas = int(linha.split(":")[1].strip())
-        elif "Páginas escritas:" in linha:
-            paginas_escritas = int(linha.split(":")[1].strip())
-        elif "Memória da tabela:" in linha:
-            memoria_tabela = int(linha.split(":")[1].replace("bytes", "").strip())
-
-    return {
-        "paginas_lidas": paginas_lidas,
-        "paginas_escritas": paginas_escritas,
-        "memoria_tabela_bytes": memoria_tabela,
-        "tempo_segundos": round(t_fim - t_inicio, 4),
-    }
 
 
 def atualizar_cenario1_com_otimo():
@@ -225,86 +190,51 @@ def atualizar_cenario2_com_otimo():
         writer.writerows(todas)
 
 
-def rodar_experimento_belady_escala():
-    os.makedirs("results", exist_ok=True)
-    os.makedirs("tests", exist_ok=True)
+def atualizar_cenario4_belady_com_otimo():
+    caminho_escala = "results/cenario4_belady_escala.csv"
+    if os.path.exists(caminho_escala):
+        with open(caminho_escala, "r") as f:
+            linhas = list(csv.DictReader(f))
 
-    tamanhos_entrada = [500, 2000, 10000, 50000]
-    caminho_csv = "results/cenario4_belady_escala.csv"
+        for r in linhas:
+            tam = int(r["tamanho_entrada"])
+            mem_kb = int(r["mem_kb"])
+            arq_teste = f"tests/belady_{tam}.log"
+            res_opt = simular_otimo_arquivo(arq_teste, 4, mem_kb)
+            r["faults_opt"] = res_opt["paginas_lidas"]
+        print("[Ótimo - Belady Escala] Concluído para N=500..50000")
 
-    with open(caminho_csv, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "tamanho_entrada", "quadros", "mem_kb",
-            "faults_fifo", "faults_clock", "faults_lru", "faults_opt"
-        ])
-        writer.writeheader()
+        with open(caminho_escala, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                "tamanho_entrada", "quadros", "mem_kb",
+                "faults_fifo", "faults_clock", "faults_lru", "faults_opt"
+            ])
+            writer.writeheader()
+            writer.writerows(linhas)
 
-        for tam in tamanhos_entrada:
-            arq_teste = f"tests/trace_belady_{tam}.log"
-            with open(arq_teste, "w") as tf:
-                fase = 0
-                gerados = 0
-                while gerados < tam:
-                    k = [5, 7, 9, 11, 13, 15][fase % 6]
-                    base = (fase % 3) * 32
-                    seq = list(range(1, k)) + list(range(1, k - 2)) + [k] + list(range(1, k + 1))
-                    for _ in range(20):
-                        for p in seq:
-                            if gerados >= tam:
-                                break
-                            vpn = base + p
-                            rw = "W" if (gerados % 3 == 0) else "R"
-                            tf.write(f"{vpn * 0x1000:08x} {rw}\n")
-                            gerados += 1
-                        if gerados >= tam:
-                            break
-                    fase += 1
+    caminho_reais = "results/cenario4_belady_reais.csv"
+    if os.path.exists(caminho_reais):
+        with open(caminho_reais, "r") as f:
+            linhas_r = list(csv.DictReader(f))
 
-            for q in range(3, 33):
-                mem_kb = q * 4
-                r_fifo = executar_simulador_c("fifo", arq_teste, 4, mem_kb)
-                r_clock = executar_simulador_c("clock", arq_teste, 4, mem_kb)
-                r_lru = executar_simulador_c("lru", arq_teste, 4, mem_kb)
-                r_opt = simular_otimo_arquivo(arq_teste, 4, mem_kb)
-                writer.writerow({
-                    "tamanho_entrada": tam,
-                    "quadros": q,
-                    "mem_kb": mem_kb,
-                    "faults_fifo": r_fifo["paginas_lidas"],
-                    "faults_clock": r_clock["paginas_lidas"],
-                    "faults_lru": r_lru["paginas_lidas"],
-                    "faults_opt": r_opt["paginas_lidas"]
-                })
-                f.flush()
-            print(f"[Belady Escala + Ótimo] Concluído para N={tam} acessos (3 a 32 quadros)")
+        for r in linhas_r:
+            prog = r["programa"]
+            mem_kb = int(r["mem_kb"])
+            caminho_prog = os.path.join("tp2-files", prog)
+            res_opt = simular_otimo_arquivo(caminho_prog, 4, mem_kb)
+            r["faults_opt"] = res_opt["paginas_lidas"]
+        print("[Ótimo - Belady Reais] Concluído para programas reais")
 
-
-def rodar_cenario5_alg_vs_tabelas():
-    os.makedirs("results", exist_ok=True)
-    caminho_csv = "results/cenario5_alg_tabelas.csv"
-    with open(caminho_csv, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "programa", "algoritmo", "tabela", "tam_memoria_kb", "memoria_tabela_bytes", "tempo_segundos"
-        ])
-        writer.writeheader()
-        for alg in ["lru", "clock", "fifo", "random"]:
-            for tab in TABELAS:
-                for mem in [128, 1024, 8192]:
-                    r = executar_simulador_c(alg, os.path.join("tp2-files", "compilador.log"), 4, mem, tab)
-                    writer.writerow({
-                        "programa": "compilador.log",
-                        "algoritmo": alg,
-                        "tabela": tab,
-                        "tam_memoria_kb": mem,
-                        "memoria_tabela_bytes": r["memoria_tabela_bytes"],
-                        "tempo_segundos": r["tempo_segundos"]
-                    })
-                    f.flush()
-    print("[Cenário 5] Matriz Algoritmo x Tabela concluída.")
+        with open(caminho_reais, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                "programa", "quadros", "mem_kb",
+                "faults_fifo", "faults_clock", "faults_lru", "faults_opt"
+            ])
+            writer.writeheader()
+            writer.writerows(linhas_r)
 
 
 def main():
-    
     if len(sys.argv) >= 4:
         caminho_arquivo = sys.argv[1]
         tam_pagina_kb = int(sys.argv[2])
@@ -322,11 +252,10 @@ def main():
         print(f"Páginas escritas: {res['paginas_escritas']}")
         return
 
-    print("Iniciando bateria de testes do Algoritmo Ótimo e experimentos extras...")
+    print("Calculando métricas do Algoritmo Ótimo para os cenários...")
     atualizar_cenario1_com_otimo()
     atualizar_cenario2_com_otimo()
-    rodar_experimento_belady_escala()
-    rodar_cenario5_alg_vs_tabelas()
+    atualizar_cenario4_belady_com_otimo()
     print("Todos os CSVs com métricas do Ótimo foram atualizados em results/.")
 
 

@@ -11,7 +11,7 @@ PROGRAMAS = [
     "simulador.log"
 ]
 
-ALGORITMOS = ["opt", "lru", "clock", "fifo", "random"]
+ALGORITMOS = ["lru", "clock", "fifo", "random"]
 TAM_MEMORIA_C1 = [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
 TAM_PAGINA_C2 = [2, 4, 8, 16, 32, 64]
 TABELAS = ["densa", "hier2", "hier3", "invertida"]
@@ -138,19 +138,18 @@ def rodar_experimento_belady_escala():
     os.makedirs("tests", exist_ok=True)
     random.seed(42)
 
-    padrao_belady = [1, 2, 3, 4, 1, 2, 5, 1, 2, 3, 4, 5]
     tamanhos_entrada = [500, 2000, 10000, 50000]
     caminho_csv = "results/cenario4_belady_escala.csv"
 
     with open(caminho_csv, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=[
             "tamanho_entrada", "quadros", "mem_kb",
-            "faults_fifo", "faults_clock", "faults_lru", "faults_opt"
+            "faults_fifo", "faults_clock", "faults_lru"
         ])
         writer.writeheader()
 
         for tam in tamanhos_entrada:
-            arq_teste = f"tests/trace_belady_{tam}.log"
+            arq_teste = f"tests/belady_{tam}.log"
             with open(arq_teste, "w") as tf:
                 fase = 0
                 gerados = 0
@@ -158,7 +157,6 @@ def rodar_experimento_belady_escala():
                     k = [5, 7, 9, 11, 13, 15][fase % 6]
                     base = (fase % 3) * 32
                     seq = list(range(1, k)) + list(range(1, k - 2)) + [k] + list(range(1, k + 1))
-                    # Repete o mesmo padrao 20 vezes seguidas para estabilizar naquela janela
                     for _ in range(20):
                         for p in seq:
                             if gerados >= tam:
@@ -176,15 +174,13 @@ def rodar_experimento_belady_escala():
                 r_fifo = executar_simulador("fifo", arq_teste, 4, mem_kb)
                 r_clock = executar_simulador("clock", arq_teste, 4, mem_kb)
                 r_lru = executar_simulador("lru", arq_teste, 4, mem_kb)
-                r_opt = executar_simulador("opt", arq_teste, 4, mem_kb)
                 writer.writerow({
                     "tamanho_entrada": tam,
                     "quadros": q,
                     "mem_kb": mem_kb,
                     "faults_fifo": r_fifo["paginas_lidas"],
                     "faults_clock": r_clock["paginas_lidas"],
-                    "faults_lru": r_lru["paginas_lidas"],
-                    "faults_opt": r_opt["paginas_lidas"]
+                    "faults_lru": r_lru["paginas_lidas"]
                 })
                 f.flush()
             print(f"[Belady Escala] Concluido para N={tam} acessos (3 a 32 quadros)")
@@ -192,7 +188,7 @@ def rodar_experimento_belady_escala():
     caminho_real_belady = "results/cenario4_belady_reais.csv"
     with open(caminho_real_belady, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=[
-            "programa", "quadros", "mem_kb", "faults_fifo", "faults_clock", "faults_lru", "faults_opt"
+            "programa", "quadros", "mem_kb", "faults_fifo", "faults_clock", "faults_lru"
         ])
         writer.writeheader()
         for prog in ["compilador.log", "matriz.log", "simulador.log"]:
@@ -202,18 +198,16 @@ def rodar_experimento_belady_escala():
                 r_fifo = executar_simulador("fifo", caminho_prog, 4, mem_kb)
                 r_clock = executar_simulador("clock", caminho_prog, 4, mem_kb)
                 r_lru = executar_simulador("lru", caminho_prog, 4, mem_kb)
-                r_opt = executar_simulador("opt", caminho_prog, 4, mem_kb)
                 writer.writerow({
                     "programa": prog,
                     "quadros": q,
                     "mem_kb": mem_kb,
                     "faults_fifo": r_fifo["paginas_lidas"],
                     "faults_clock": r_clock["paginas_lidas"],
-                    "faults_lru": r_lru["paginas_lidas"],
-                    "faults_opt": r_opt["paginas_lidas"]
+                    "faults_lru": r_lru["paginas_lidas"]
                 })
                 f.flush()
-            print(f"[Belady Traces Reais] Concluido varredura fina para {prog}")
+            print(f"[Belady Reais] Concluido varredura fina para {prog}")
 
 def rodar_cenario5_alg_vs_tabelas():
     os.makedirs("results", exist_ok=True)
